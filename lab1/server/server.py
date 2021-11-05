@@ -3,7 +3,7 @@
 # TDA596 - Lab 1
 # server/server.py
 # Input: Node_ID total_number_of_ID
-# Student: Léon Michalski
+# Student: Léon Michalski, Max Sonnelid, Elias Estribeau
 # ------------------------------------------------------------------------------------------------------
 import traceback
 import sys
