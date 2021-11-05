@@ -96,13 +96,6 @@ try:
 
             add_new_element_to_store(element_id, new_entry)
 
-            # you should propagate something
-            # Please use threads to avoid blocking
-            # thread = Thread(target=???,args=???)
-            # For example: thread = Thread(target=propagate_to_vessels, args=....)
-            # you should create the thread as a deamon with thread.daemon = True
-            # then call thread.start() to spawn the thread
-
             # Propagate action to all other nodes example :
             thread = Thread(target=propagate_to_vessels,
                             args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
