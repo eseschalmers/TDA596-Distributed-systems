@@ -70,7 +70,7 @@ try:
     def index():
         global board, node_id
         return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
-                board_dict=sorted({"0":board,}.iteritems()), members_name_string='YOUR NAME')
+                board_dict=sorted({"0":board,}.iteritems()), members_name_string='Léon Michalski, Max Sonnelid, Elias Estribeau')
 
     @app.get('/board')
     def get_board():
