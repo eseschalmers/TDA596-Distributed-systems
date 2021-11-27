@@ -1,6 +1,6 @@
 # coding=utf-8
 # ------------------------------------------------------------------------------------------------------
-# TDA596 - Lab 1
+# TDA596 - Lab 2
 # server/server.py
 # Input: Node_ID total_number_of_ID
 # Student: Léon Michalski, Max Sonnelid, Elias Estribeau
@@ -25,9 +25,10 @@ try:
     # ------------------------------------------------------------------------------------------------------
     # BOARD FUNCTIONS
     # You will probably need to modify them
+    # These functions are NOT changed compared to Lab 1
     # ------------------------------------------------------------------------------------------------------
     
-    #This functions will add an new element
+    #These functions will add an new element
     def add_new_element_to_store(entry_sequence, element, is_propagated_call=False):
         global board, node_id
         success = False
@@ -64,6 +65,7 @@ try:
     # ROUTES
     # ------------------------------------------------------------------------------------------------------
     # a single example (index) for get, and one for post
+    # These functions are NOT changed compared to Lab 1
     # ------------------------------------------------------------------------------------------------------
     #No need to modify this
     @app.route('/')
@@ -90,6 +92,7 @@ try:
             new_entry = request.forms.get('entry')
             
             success = False
+            # If the current node is a leader, then assign the entry it a unique element_id and add it to the leader's board
             # Propagate action:
             if (node_id == leader_id):
             	print("Propagating to replicas")
@@ -98,12 +101,15 @@ try:
                     element_id = element_id + 1
                 success = add_new_element_to_store(element_id, new_entry)
 
+                #If adding the entry was successful, then propagate the entry to all vessels
                 if success:
                 	# Propagate to all the replicas
                 	thread = Thread(target=propagate_to_vessels,
                 		args=('/propagate/ADD/{}'.format(element_id), {'entry': new_entry}, 'POST'))
                 	thread.daemon = True
                 	thread.start()
+
+            #If the current node is NOT a leader, then assign it the temperary element_id -1 and propagate the entry to the leader node
             else:
             	print("Propagating to leader")
             	success = propagate_to_leader(
@@ -114,6 +120,8 @@ try:
 
             if success:
             	return '<h1>Successfully added entry</h1>'
+            
+            #This text is primarily returned when a new entry can not be propagated to the leader, which has failed. After the leader electon is done, the user can try to add the entry again.
             else:
             	return '<h1>Failed, please retry in a few seconds</hi>'
         except Exception as e:
@@ -139,6 +147,8 @@ try:
             
             #propagate to other nodes
             success = False
+
+            # If the current node is a leader, then modify resp. delete the entry from the leader's board variable and then propagate the changes to all vessels.
             if (node_id == leader_id):
                 if action == "MODIFY":
                 	success = modify_element_in_store(element_id, entry, False)
@@ -150,6 +160,9 @@ try:
                                 	args=('/propagate/{}/{}'.format(action, element_id), {'entry': entry}, 'POST'))
                 	thread.daemon = True
                 	thread.start()
+
+            #If the current node is NOT a leader, then propagate the delete resp. modify action to the leader node
+
             else:
             	print("Propagating to leader")
             	success = propagate_to_leader(
@@ -160,6 +173,8 @@ try:
 
             if success:
             	return '<h1>Successfully ' + action + ' entry</h1>'
+
+            #This text is primarily returned when a new entry can not be propagated to the leader, which has failed. After the leader electon is done, the user can try to add the entry again.
             else:
             	return '<h1>Failed, please retry in a few seconds</h1>'	
         except Exception as e:
@@ -176,7 +191,7 @@ try:
         
         # Handle requests
         if action == "ADD":
-            if (element_id == -1): # This add request is coming from one of the replicas
+            if (element_id == -1): # This add request is coming from one of the replicas. The algorithm below replaces the temporary id -1 with a unique one.
             	element_id = 0
             	while (element_id in board):
             		element_id = element_id + 1
@@ -191,6 +206,7 @@ try:
         else:
             return False
             
+        #Id the current node is the leader, then propagate all the changes to the other vessels.    
         if (node_id == leader_id):
             thread = Thread(target=propagate_to_vessels,
                                 args=('/propagate/{}/{}'.format(action, element_id), {'entry': entry}, 'POST'))
@@ -199,7 +215,7 @@ try:
 
         return '<h1>Successfully propagated ' + action + '</h1>'
 
-
+    #The leader election gets started when this function is called.
     @app.get('/election/started')
     def election_started():
     	thread = Thread(target=start_election)
@@ -207,7 +223,7 @@ try:
     	thread.start()
     	return '<h1>Election started</h1>'
 
-
+    #This function responds to a successful leader election by setting the winning leader number to the current leader for the current node.
     @app.post('/election/success/<leader:int>')
     def election_successful(leader):
      	global leader_id
@@ -218,6 +234,8 @@ try:
     # ------------------------------------------------------------------------------------------------------
     # DISTRIBUTED COMMUNICATIONS FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
+    
+    #This function has not been changed comapred to lab 1
     def contact_vessel(vessel_ip, path, payload=None, req='POST'):
         # Try to contact another server (vessel) through a POST or GET, once
         success = False
@@ -235,7 +253,8 @@ try:
         	print(e)
         return success
 
-	
+	#Function used for propagating an added/modified/deleted message to a leader (similar to 'propagate_to_vessels()')
+    #If leader can not be contacted, then start a leader election by calling 'start_election()'.
     def propagate_to_leader(path, payload = None, req = 'POST'):
         global vessel_list, node_id, leader_id
         
@@ -252,6 +271,7 @@ try:
         return success
 
 
+    #This function has not been changed comapred to lab 1
     def propagate_to_vessels(path, payload = None, req = 'POST'):
         """
         Propagate a message to all the replicas.
@@ -264,6 +284,14 @@ try:
                 success = contact_vessel(vessel_ip, path, payload, req)
                 if not success:
                     print("\n\nCould not contact vessel {}\n\n".format(vessel_id))
+
+    #This function starts a leader election according to the bully algorithm
+    #The node that calls start_election, is a leader candidate as long as 'is_new_leader' is True.
+    #The leader candidate contacts all nodes with a higher id than its own.
+    #If it gets a response from one of the contacted nodes, it is no longer a leader candidate.
+    #If it does NOT get a resposne from one of the contacted nodes or if there are no nodes with a higher id,
+    # the leader candidate is elected as the new leader and then calls 'propagate_new_leader()' to
+    # tell all the other nodes who is the new leader.
 
     def start_election():
     	global vessel_list, node_id, leader_id
@@ -291,6 +319,9 @@ try:
      		thread.start()
      	return is_new_leader
 
+    #Contacts all nodes with '/election/success/', which triggers 'election_successful()'
+    # and sets the leader_id to the id of the newly elected leader
+
     def propagate_new_leader(id):
     	global vessel_list, node_id
 
@@ -300,6 +331,7 @@ try:
 
     # ------------------------------------------------------------------------------------------------------
     # EXECUTION
+    # Apart from including the new global variable 'leader_id', no changed have been made compared to lab 1.
     # ------------------------------------------------------------------------------------------------------
     def main():
         global vessel_list, node_id, app, leader_id
@@ -315,6 +347,7 @@ try:
         for i in range(1, args.nbv+1):
             vessel_list[str(i)] = '10.1.0.{}'.format(str(i))
 
+        #Set the initial leader to 1
         leader_id = 1
         try:
             run(app, host=vessel_list[str(node_id)], port=port)
