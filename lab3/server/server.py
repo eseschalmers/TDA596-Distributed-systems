@@ -44,26 +44,23 @@ try:
         global board, node_id
         success = False
         try:
-            if entry_sequence in board:
-            	if board[entry_sequence][1] < latest_modification:
-	                board[entry_sequence] = (modified_element, latest_modification)
-	                success = True
-            else:
-            	board[entry_sequence] = (modified_element, latest_modification)
-            	success = True
+        	if entry_sequence in board:
+        		if (board[entry_sequence][1] + datetime.timedelta(seconds=20)) < latest_modification:
+        			board[entry_sequence] = (modified_element, latest_modification)
+        			success = True
         except Exception as e:
-            print e
+        	print e
         return success
 
     def delete_element_from_store(entry_sequence, latest_modification, is_propagated_call = False):
         global board, node_id
         success = False
         try:
-        	if board[entry_sequence][1] < latest_modification:
-	            board.pop(entry_sequence)
-	            success = True
+        	if (board[entry_sequence][1] + datetime.timedelta(seconds=20)) < latest_modification:
+        		board.pop(entry_sequence)
+        		success = True
         except Exception as e:
-            print e
+        	print e
         return success
 
     # ------------------------------------------------------------------------------------------------------
@@ -118,33 +115,34 @@ try:
     @app.post('/board/<element_id>/')
     def client_action_received(element_id):
         try:
-            global board, node_id
-            
-            print "You receive an element", element_id
-            print "id is ", node_id
-            # Get the entry from the HTTP body
-            entry = request.forms.get('entry')
-            latest_modification = datetime.datetime.now()
-            
-            delete_option = request.forms.get('delete') 
-	        #0 = modify, 1 = delete
-	        
-            print "the delete option is ", delete_option
-            
-            #call either delete or modify
-            if (int(delete_option) == 0):
-                modify_element_in_store(element_id, entry, latest_modification, False)
-                action = "MODIFY"
-            
-            if (int(delete_option) == 1):
-                delete_element_from_store(element_id, latest_modification, False)
-                action = "DELETE"
-            
-            #propagate to other nodes
-            thread = Thread(target=propagate_to_vessels,
+        	global board, node_id
+
+        	print "You receive an element", element_id
+        	print "id is ", node_id
+
+        	# Get the entry from the HTTP body
+        	entry = request.forms.get('entry')
+        	latest_modification = datetime.datetime.now()
+        	delete_option = request.forms.get('delete')
+
+        	#0 = modify, 1 = delete
+
+        	print("Client action", entry, str(latest_modification))
+
+        	#call either delete or modify
+        	if (int(delete_option) == 0):
+        		modify_element_in_store(element_id, entry, latest_modification, False)
+        		action = "MODIFY"
+
+        	if (int(delete_option) == 1):
+        		delete_element_from_store(element_id, latest_modification, False)
+        		action = "DELETE"
+
+        	#propagate to other nodes
+        	thread = Thread(target=propagate_to_vessels,
                                 args=('/propagate/' + action + "/" + str(element_id), {'entry': entry, 'latest_modification': str(latest_modification)}, 'POST'))
-            thread.daemon = True
-            thread.start()
+        	thread.daemon = True
+        	thread.start()
         except Exception as e:
             print e
 
@@ -155,6 +153,8 @@ try:
         entry = request.forms.get('entry')
         latest_modification = datetime.datetime.strptime(request.forms.get('latest_modification'), '%Y-%m-%d %H:%M:%S.%f')
         print "the action is", action
+
+        print("Propagation received", entry, str(latest_modification))
         
         # Handle requests
         if action == "ADD":
