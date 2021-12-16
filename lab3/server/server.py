@@ -19,12 +19,19 @@ from bottle import Bottle, run, request, template
 import requests
 
 class BoardEntry:
+<<<<<<< HEAD
 	def __init__(self, id, message, last_updated, last_refreshed, change_count, is_deleted = False):
+=======
+	def __init__(self, id, message, last_updated, last_refreshed, is_deleted = False):
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 		self.id = id
 		self.message = message
 		self.last_updated = last_updated
 		self.last_refreshed = last_refreshed
+<<<<<<< HEAD
 		self.change_count = change_count
+=======
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 		self.is_deleted = is_deleted
 
 	def toJson(self):
@@ -32,7 +39,10 @@ class BoardEntry:
 			"id": self.id,
 			"message": self.message,
 			"last_updated": self.last_updated.strftime('%Y-%m-%d %H:%M:%S.%f'),
+<<<<<<< HEAD
 			"change_count": self.change_count,
+=======
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 			"is_deleted": self.is_deleted
 		}
 	
@@ -43,7 +53,10 @@ class BoardEntry:
 			entry["message"],
 			last_updated = datetime.strptime(entry["last_updated"], '%Y-%m-%d %H:%M:%S.%f'),
 			last_refreshed = datetime.now(),
+<<<<<<< HEAD
 			change_count = entry["change_count"],
+=======
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 			is_deleted = entry["is_deleted"]
 		)
 # ------------------------------------------------------------------------------------------------------
@@ -53,9 +66,15 @@ try:
 	#board stores all message on the system
 	# An entry is UUID : (Text, last_updated, last_refreshed)
 	# board = {"0" : ("Welcome to Distributed Systems Course", datetime.now(), datetime.now())}
+<<<<<<< HEAD
 
 	board = {
 			"0": BoardEntry("0", "Welcome to Distributed Systems Course", datetime(2020, 1, 1), datetime(2020, 1, 1), 0)
+=======
+	board = {
+			"0": BoardEntry("0", "Welcome to Distributed Systems Course", datetime(2020, 1, 1), datetime(2020, 1, 1)),
+			"1": BoardEntry("1", "Test", datetime(2019, 1, 1), datetime(2019, 1, 1))
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 		}
 	# ------------------------------------------------------------------------------------------------------
 	# BOARD FUNCTIONS
@@ -80,6 +99,7 @@ try:
 		success = False
 		try:
 			if entry.id in board:
+<<<<<<< HEAD
 				if (board[entry.id].change_count < entry.change_count):
 					board[entry.id] = entry
 					success = True
@@ -88,6 +108,12 @@ try:
 						# board[entry_sequence] = (modified_element, latest_modification, datetime.now())
 						board[entry.id] = entry
 						success = True
+=======
+				if (board[entry.id].last_updated) < entry.last_updated:
+					# board[entry_sequence] = (modified_element, latest_modification, datetime.now())
+					board[entry.id] = entry
+					success = True
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 		except Exception as e:
 			print(e)
 		return success
@@ -124,8 +150,12 @@ try:
 				str(uuid.uuid4()),
 				request.forms.get('entry'),
 				datetime.now(),
+<<<<<<< HEAD
 				datetime.now(),
 				0
+=======
+				datetime.now()
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 			)
 
 			success = add_new_element_to_store(new_entry)
@@ -154,8 +184,12 @@ try:
 				element_id,
 				request.forms.get('entry'),
 				datetime.now(),
+<<<<<<< HEAD
 				datetime.now(),
 				board[element_id].change_count + 1
+=======
+				datetime.now()
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
 			)
 
 			#call either delete or modify
@@ -305,4 +339,8 @@ try:
 except Exception as e:
 		traceback.print_exc()
 		while True:
+<<<<<<< HEAD
 			time.sleep(60.)
+=======
+			time.sleep(60.)
+>>>>>>> 9325e591a351bcd211b97f814bcc7faf9ffcf5cf
