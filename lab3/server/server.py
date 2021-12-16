@@ -9,56 +9,78 @@ import traceback
 import sys
 import time
 import uuid
-import datetime
+from datetime import datetime
 import json
 import argparse
 from threading import Thread
+import heapq
 
 from bottle import Bottle, run, request, template
 import requests
+
+class BoardEntry:
+	def __init__(self, id, message, last_updated, last_refreshed, is_deleted = False):
+		self.id = id
+		self.message = message
+		self.last_updated = last_updated
+		self.last_refreshed = last_refreshed
+		self.is_deleted = is_deleted
+
+	def toJson(self):
+		return {
+			"id": self.id,
+			"message": self.message,
+			"last_updated": self.last_updated.strftime('%Y-%m-%d %H:%M:%S.%f'),
+			"is_deleted": self.is_deleted
+		}
+	
+	@classmethod
+	def fromJson(cls, entry):
+		return cls(
+			entry["id"],
+			entry["message"],
+			last_updated = datetime.strptime(entry["last_updated"], '%Y-%m-%d %H:%M:%S.%f'),
+			last_refreshed = datetime.now(),
+			is_deleted = entry["is_deleted"]
+		)
 # ------------------------------------------------------------------------------------------------------
 try:
 	app = Bottle()
 
 	#board stores all message on the system
-	board = {"0" : ("Welcome to Distributed Systems Course", datetime.datetime.now())} 
-
+	# An entry is UUID : (Text, last_updated, last_refreshed)
+	# board = {"0" : ("Welcome to Distributed Systems Course", datetime.now(), datetime.now())}
+	board = {
+			"0": BoardEntry("0", "Welcome to Distributed Systems Course", datetime(2020, 1, 1), datetime(2020, 1, 1)),
+			"1": BoardEntry("1", "Test", datetime(2019, 1, 1), datetime(2019, 1, 1))
+		}
 	# ------------------------------------------------------------------------------------------------------
 	# BOARD FUNCTIONS
 	# You will probably need to modify them
 	# ------------------------------------------------------------------------------------------------------
 	
 	#This functions will add an new element
-	def add_new_element_to_store(entry_sequence, element, latest_modification, is_propagated_call=False):
+	def add_new_element_to_store(entry):
 		global board, node_id
 		success = False
 		try:
-			if entry_sequence not in board:
-				board[entry_sequence] = (element, latest_modification)
+			if entry.id not in board.keys():
+				# board[entry_sequence] = (element, latest_modification, datetime.now())
+				board[entry.id] = entry
 				success = True
 		except Exception as e:
 			print(e)
 		return success
 
-	def modify_element_in_store(entry_sequence, modified_element, latest_modification, is_propagated_call = False):
+	def modify_element_in_store(entry):
 		global board, node_id
 		success = False
 		try:
-			if entry_sequence in board:
-				if (board[entry_sequence][1] + datetime.timedelta(seconds=20)) < latest_modification:
-					board[entry_sequence] = (modified_element, latest_modification)
+			if entry.id in board:
+				if (board[entry.id].last_updated) < entry.last_updated:
+					# board[entry_sequence] = (modified_element, latest_modification, datetime.now())
+					board[entry.id] = entry
 					success = True
-		except Exception as e:
-			print(e)
-		return success
-
-	def delete_element_from_store(entry_sequence, latest_modification, is_propagated_call = False):
-		global board, node_id
-		success = False
-		try:
-			if (board[entry_sequence][1] + datetime.timedelta(seconds=20)) < latest_modification:
-				board.pop(entry_sequence)
-				success = True
 		except Exception as e:
 			print(e)
 		return success
@@ -72,14 +94,15 @@ try:
 	@app.route('/')
 	def index():
 		global board, node_id
+		print_board = {id:board[id].message for id in board.keys() if not board[id].is_deleted}
 		return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
-				board_dict=sorted({"0":board,}.iteritems()), members_name_string='Léon Michalski, Max Sonnelid, Elias Estribeau')
+				board_dict=sorted({"0":print_board,}.iteritems()), members_name_string='Léon Michalski, Max Sonnelid, Elias Estribeau')
 
 	@app.get('/board')
 	def get_board():
 		global board, node_id
-		print(board)
-		return template('server/boardcontents_template.tpl',board_title='Vessel {}'.format(node_id), board_dict=sorted(board.iteritems()))
+		print_board = {id:board[id].message for id in board.keys() if not board[id].is_deleted}
+		return template('server/boardcontents_template.tpl',board_title='Vessel {}'.format(node_id), board_dict=sorted(print_board.iteritems()))
 	
 	#------------------------------------------------------------------------------------------------------
 	
@@ -90,24 +113,21 @@ try:
 		Called directly when a user is doing a POST request on /board'''
 		global board, node_id
 		try:
-			new_entry = request.forms.get('entry')
-			
-			element_id = 0
-			latest_modification = datetime.datetime.now()
-		   
-			while (element_id in board):
-				element_id = element_id + 1
+			new_entry = BoardEntry(
+				str(uuid.uuid4()),
+				request.forms.get('entry'),
+				datetime.now(),
+				datetime.now()
+			)
 
-			element_id = str(uuid.uuid4())
-
-			add_new_element_to_store(element_id, new_entry, latest_modification)
-
+			success = add_new_element_to_store(new_entry)
 			# Propagate action to all other nodes example :
-			thread = Thread(target=propagate_to_vessels,
-							args=('/propagate/ADD/' + str(element_id), {'entry': new_entry, 'latest_modification': str(latest_modification)}, 'POST'))
-			thread.daemon = True
-			thread.start()
-			return '<h1>Successfully added entry</h1>'
+			if success:
+				# thread = Thread(target=propagate_to_vessels,
+				# 				args=('/propagate/ADD/' + new_entry.id, {'entry': new_entry.toJson()}, 'POST'))
+				# thread.daemon = True
+				# thread.start()
+				return '<h1>Successfully added entry</h1>'
 		except Exception as e:
 			print(e)
 		return '<h1>Failed, please retry in a few seconds</hi>'
@@ -118,63 +138,67 @@ try:
 		try:
 			global board, node_id
 
-			print("You receive an element", element_id)
-			print("id is ", node_id)
-
 			# Get the entry from the HTTP body
-			entry = request.forms.get('entry')
-			latest_modification = datetime.datetime.now()
 			delete_option = request.forms.get('delete')
 
 			#0 = modify, 1 = delete
-
-			print("Client action", entry, str(latest_modification))
+			new_entry = BoardEntry(
+				element_id,
+				request.forms.get('entry'),
+				datetime.now(),
+				datetime.now()
+			)
 
 			#call either delete or modify
 			if (int(delete_option) == 0):
-				success = modify_element_in_store(element_id, entry, latest_modification, False)
+				new_entry.is_deleted = False
 				action = "MODIFY"
-
-			if (int(delete_option) == 1):
-				success = delete_element_from_store(element_id, latest_modification, False)
+			elif (int(delete_option) == 1):
+				new_entry.is_deleted = True
 				action = "DELETE"
 
+			success = modify_element_in_store(new_entry)
 			#propagate to other nodes
-			thread = Thread(target=propagate_to_vessels,
-								args=('/propagate/' + action + "/" + str(element_id), {'entry': entry, 'latest_modification': str(latest_modification)}, 'POST'))
-			thread.daemon = True
-			thread.start()
+			if success:
+				#thread = Thread(target=propagate_to_vessels,
+									#args=('/propagate/' + action + "/" + str(element_id), new_entry.toJson(), 'POST'))
+				#thread.daemon = True
+				#thread.start()
+				return '<h1>Successfully ' + action + ' entry</h1>'
+
 		except Exception as e:
 			print(e)
-		if success:
-			return '<h1>Successfully ' + action + ' entry</h1>'
-		else:
-			return '<h1>Failed, please retry in a few seconds</h1>'	
+		return '<h1>Failed, please retry in a few seconds</h1>'	
 
 	#With this function you handle requests from other nodes like add modify or delete
 	@app.post('/propagate/<action>/<element_id>')
 	def propagation_received(action, element_id):
-		#get entry from http body
-		entry = request.forms.get('entry')
-		latest_modification = datetime.datetime.strptime(request.forms.get('latest_modification'), '%Y-%m-%d %H:%M:%S.%f')
-		print("the action is", action)
-
-		print("Propagation received", entry, str(latest_modification))
+		entry = BoardEntry.fromJson(request.json)
+		print("Propagation received", entry.id, str(entry.last_updated))
 		
 		# Handle requests
 		if action == "ADD":
-			add_new_element_to_store(element_id, entry, latest_modification, True)
+			add_new_element_to_store(entry)
 		# Modify the board entry
-		elif action == "MODIFY":
-			modify_element_in_store(element_id, entry, latest_modification, True)
-		# Delete the entry from the board
-		elif "DELETE":
-			delete_element_from_store(element_id, latest_modification, True)
+		elif action == "MODIFY" or action == "DELETE":
+			modify_element_in_store(entry)
 		else:
 			return '<h1>Unknown action:' + action + '</h1>'
 		
 		return '<h1>Successfully propagated ' + action + '</h1>'
 
+	@app.post('/propagate/sync')
+	def propagation_sync():
+		global board
+		ids = request.forms.get('ids').split(',')
+		result = {}
+		for id in ids:
+			r = board.get(id)
+			if r is not None:
+				result[id] = r.toJson()
+			else:
+				result[id] = None
+		return result
 
 	# ------------------------------------------------------------------------------------------------------
 	# DISTRIBUTED COMMUNICATIONS FUNCTIONS
@@ -184,7 +208,7 @@ try:
 		success = False
 		try:
 			if 'POST' in req:
-				res = requests.post('http://{}{}'.format(vessel_ip, path), data=payload)
+				res = requests.post('http://{}{}'.format(vessel_ip, path), json=payload)
 			elif 'GET' in req:
 				res = requests.get('http://{}{}'.format(vessel_ip, path))
 			else:
@@ -206,7 +230,40 @@ try:
 				if not success:
 					print("\n\nCould not contact vessel {}\n\n".format(vessel_id))
 
-		
+	def sync():
+		global vessel_list, node_id, board
+		next_node = (int(node_id) % len(vessel_list)) + 1# Get the next node
+		next_node_ip = vessel_list[str(next_node)]
+		while(True):
+			time.sleep(10.0)
+			try:
+				payload = sorted(board.values(), key=lambda e: e.last_refreshed)[:5]
+
+				payload = [entry.id for entry in payload]
+				payload = ",".join(payload)
+				payload = {"ids": payload}
+				res = requests.post('http://{}/propagate/sync'.format(next_node_ip), data=payload)
+
+				if res.status_code == 200:
+					js = res.json()
+					ids_to_propagate = [] # List of ids to propagate
+					for id in js.keys():
+						if js[id] is not None:
+							entry = BoardEntry.fromJson(js[id])
+							modify_element_in_store(entry)
+						else:
+							ids_to_propagate.append(id)
+						# We have refreshed this board entry
+						board[entry.id].last_refreshed = entry.last_refreshed
+					for id in ids_to_propagate:
+						# Propagate the entries that the next node didn't have
+						contact_vessel(next_node_ip, '/propagate/ADD/{}'.format(id), board[id].toJson(), 'POST')
+			except Exception as e:
+				print(e)
+				# The next node failed, we can propagate to the next one
+				next_node = (next_node % len(vessel_list)) + 1
+				next_node_ip = vessel_list[str(next_node)]
+
 	# ------------------------------------------------------------------------------------------------------
 	# EXECUTION
 	# ------------------------------------------------------------------------------------------------------
@@ -225,6 +282,9 @@ try:
 			vessel_list[str(i)] = '10.1.0.{}'.format(str(i))
 
 		try:
+			thread = Thread(target=sync)
+			thread.daemon = True
+			thread.start()
 			run(app, host=vessel_list[str(node_id)], port=port)
 		except Exception as e:
 			print(e)
