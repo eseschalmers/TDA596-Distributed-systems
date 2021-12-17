@@ -8,23 +8,20 @@
 import traceback
 import sys
 import time
-import uuid
 from datetime import datetime
 import json
 import argparse
 from threading import Thread
-import heapq
 
 from bottle import Bottle, run, request, template
 import requests
 
 class BoardEntry:
-	def __init__(self, id, message, last_updated, last_refreshed, change_count, is_deleted = False):
+	def __init__(self, id, message, last_updated, last_refreshed, is_deleted = False):
 		self.id = id
 		self.message = message
 		self.last_updated = last_updated
 		self.last_refreshed = last_refreshed
-		self.change_count = change_count
 		self.is_deleted = is_deleted
 
 	def toJson(self):
@@ -32,7 +29,6 @@ class BoardEntry:
 			"id": self.id,
 			"message": self.message,
 			"last_updated": self.last_updated.strftime('%Y-%m-%d %H:%M:%S.%f'),
-			"change_count": self.change_count,
 			"is_deleted": self.is_deleted
 		}
 	
@@ -43,19 +39,18 @@ class BoardEntry:
 			entry["message"],
 			last_updated = datetime.strptime(entry["last_updated"], '%Y-%m-%d %H:%M:%S.%f'),
 			last_refreshed = datetime.now(),
-			change_count = entry["change_count"],
 			is_deleted = entry["is_deleted"]
 		)
 # ------------------------------------------------------------------------------------------------------
 try:
 	app = Bottle()
 
-	#board stores all message on the system
-	# An entry is UUID : (Text, last_updated, last_refreshed)
-	# board = {"0" : ("Welcome to Distributed Systems Course", datetime.now(), datetime.now())}
+	local_counter = 0 # Local counter of each messages added by clients on this node
 
+	# board stores all messages on the system
 	board = {
-			"0": BoardEntry("0", "Welcome to Distributed Systems Course", datetime(2020, 1, 1), datetime(2020, 1, 1), 0)
+			"0:0": BoardEntry("0:0", "Welcome to Distributed Systems Course", datetime(2020, 1, 1), datetime(2020, 1, 1)),
+			"0:1": BoardEntry("0:1", "Older message", datetime(2019, 1, 1), datetime(2019, 1, 1)),
 		}
 	# ------------------------------------------------------------------------------------------------------
 	# BOARD FUNCTIONS
@@ -80,14 +75,9 @@ try:
 		success = False
 		try:
 			if entry.id in board:
-				if (board[entry.id].change_count < entry.change_count):
+				if board[entry.id].last_updated <= entry.last_updated:
 					board[entry.id] = entry
-					success = True
-				if (board[entry.id].change_count == entry.change_count):
-					if ((board[entry.id].last_updated) > entry.last_updated):
-						# board[entry_sequence] = (modified_element, latest_modification, datetime.now())
-						board[entry.id] = entry
-						success = True
+					success = True			
 		except Exception as e:
 			print(e)
 		return success
@@ -103,7 +93,7 @@ try:
 		global board, node_id
 		print_board = {id:board[id].message for id in board.keys() if not board[id].is_deleted}
 		return template('server/index.tpl', board_title='Vessel {}'.format(node_id),
-				board_dict=sorted({"0":print_board,}.iteritems()), members_name_string='Léon Michalski, Max Sonnelid, Elias Estribeau')
+				board_dict=sorted({"0-0":print_board,}.iteritems()), members_name_string='Léon Michalski, Max Sonnelid, Elias Estribeau')
 
 	@app.get('/board')
 	def get_board():
@@ -118,23 +108,23 @@ try:
 	def client_add_received():
 		'''Adds a new element to the board
 		Called directly when a user is doing a POST request on /board'''
-		global board, node_id
+		global board, node_id, local_counter
 		try:
 			new_entry = BoardEntry(
-				str(uuid.uuid4()),
+				"{}:{}".format(node_id, local_counter),
 				request.forms.get('entry'),
 				datetime.now(),
-				datetime.now(),
-				0
+				datetime.now()
 			)
+			local_counter += 1
 
 			success = add_new_element_to_store(new_entry)
 			# Propagate action to all other nodes example :
 			if success:
-				# thread = Thread(target=propagate_to_vessels,
-				# 				args=('/propagate/ADD/' + new_entry.id, {'entry': new_entry.toJson()}, 'POST'))
-				# thread.daemon = True
-				# thread.start()
+				thread = Thread(target=propagate_to_vessels,
+				 				 args=('/propagate/ADD/' + new_entry.id, new_entry.toJson(), 'POST'))
+				thread.daemon = True
+				thread.start()
 				return '<h1>Successfully added entry</h1>'
 		except Exception as e:
 			print(e)
@@ -154,8 +144,7 @@ try:
 				element_id,
 				request.forms.get('entry'),
 				datetime.now(),
-				datetime.now(),
-				board[element_id].change_count + 1
+				datetime.now()
 			)
 
 			#call either delete or modify
@@ -169,10 +158,10 @@ try:
 			success = modify_element_in_store(new_entry)
 			#propagate to other nodes
 			if success:
-				#thread = Thread(target=propagate_to_vessels,
-									#args=('/propagate/' + action + "/" + str(element_id), new_entry.toJson(), 'POST'))
-				#thread.daemon = True
-				#thread.start()
+				thread = Thread(target=propagate_to_vessels,
+								args=('/propagate/' + action + "/" + str(element_id), new_entry.toJson(), 'POST'))
+				thread.daemon = True
+				thread.start()
 				return '<h1>Successfully ' + action + ' entry</h1>'
 
 		except Exception as e:
@@ -194,7 +183,7 @@ try:
 		else:
 			return '<h1>Unknown action:' + action + '</h1>'
 		
-		return '<h1>Successfully propagated ' + action + '</h1>'
+		return '<h1>Received propagation: ' + action + '</h1>'
 
 	@app.post('/propagate/sync')
 	def propagation_sync():
@@ -244,32 +233,48 @@ try:
 		next_node = (int(node_id) % len(vessel_list)) + 1# Get the next node
 		next_node_ip = vessel_list[str(next_node)]
 		while(True):
-			time.sleep(10.0)
+			time.sleep(5.0)
 			try:
-				payload = sorted(board.values(), key=lambda e: e.last_refreshed)[:5]
+				# Get the 3 ids that we haven't refreshed for the most amount of time
+				payload = sorted(board.values(), key=lambda e: e.last_refreshed)[:3]
 
 				payload = [entry.id for entry in payload]
 				payload = ",".join(payload)
 				payload = {"ids": payload}
+
+				# Ask the next node what the BoardEntry for these 3 ids are
 				res = requests.post('http://{}/propagate/sync'.format(next_node_ip), data=payload)
 
 				if res.status_code == 200:
 					js = res.json()
-					ids_to_propagate = [] # List of ids to propagate
+					ids_to_add = []		# List of ids that are missing on the next node
+					ids_to_update = []	# List of ids that are outdated on next node
+
+					# Iterate through the 3 BoardEntry we have received
 					for id in js.keys():
 						if js[id] is not None:
 							entry = BoardEntry.fromJson(js[id])
-							modify_element_in_store(entry)
+							if modify_element_in_store(entry) == False:
+								# The entry we got was outdated, we will push our (newer) entry to the next node
+								ids_to_update.append(id)
 						else:
-							ids_to_propagate.append(id)
-						# We have refreshed this board entry
+							# The next node did not have a board entry with this id, we will push it
+							ids_to_add.append(id)
+
+						# Mark the board entries as refreshed in our own board
 						board[entry.id].last_refreshed = entry.last_refreshed
-					for id in ids_to_propagate:
+
+					for id in ids_to_add:
 						# Propagate the entries that the next node didn't have
 						contact_vessel(next_node_ip, '/propagate/ADD/{}'.format(id), board[id].toJson(), 'POST')
+
+					for id in ids_to_update:
+						# Propagate updates that the other node did not have
+						contact_vessel(next_node_ip, '/propagate/MODIFY/{}'.format(id), board[id].toJson(), 'POST')
+
 			except Exception as e:
 				print(e)
-				# The next node failed, we can propagate to the next one
+				# The next node failed, we can sync with the next one
 				next_node = (next_node % len(vessel_list)) + 1
 				next_node_ip = vessel_list[str(next_node)]
 
