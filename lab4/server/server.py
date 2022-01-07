@@ -20,7 +20,7 @@ try:
 
     #board stores all message on the system 
     board = {0 : "Welcome to Distributed Systems Course"} 
-
+    vote_vector = []
 
     # ------------------------------------------------------------------------------------------------------
     # BOARD FUNCTIONS
@@ -77,6 +77,36 @@ try:
         global board, node_id
         print board
         return template('server/boardcontents_template.tpl',board_title='Vessel {}'.format(node_id), board_dict=sorted(board.iteritems()))
+
+    # NEW BYZANTINE ALGORITHM FUNCTIONS
+
+    @app.post('/vote/<action>')
+    def client_vote_received(action):
+        global vote_vector
+        try:
+            print('The performed action is: ' + action)
+            vote_vector.append(action)
+            print('The current vote vector looks like: ' + str(vote_vector))
+
+            # Propagate action to all other nodes example :
+            thread = Thread(target=propagate_to_vessels,
+                            args=('/propagate/VOTE/', {"action": action}, 'POST'))
+            thread.daemon = True
+            thread.start()
+
+            return True
+        except Exception as e:
+            print e
+        return False
+
+         #With this function you handle requests from other nodes like add modify or delete
+    @app.post('/propagate/VOTE/')
+    def vote_propagation_received():
+	    #get entry from http body
+        entry = request.forms.get('action')
+        print "The received vote is: " + entry
+        
+        return True
     
     #------------------------------------------------------------------------------------------------------
     
