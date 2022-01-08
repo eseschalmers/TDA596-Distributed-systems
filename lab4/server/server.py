@@ -20,7 +20,11 @@ try:
 
     #board stores all message on the system 
     board = {0 : "Welcome to Distributed Systems Course"} 
-    vote_vector = []
+    vote_dict = {}
+    vector_list = []
+    byz_node = False
+    no_loyal = 3
+    no_total = 4
 
     # ------------------------------------------------------------------------------------------------------
     # BOARD FUNCTIONS
@@ -82,31 +86,154 @@ try:
 
     @app.post('/vote/<action>')
     def client_vote_received(action):
-        global vote_vector
+        global vote_dict, node_id, byz_node
         try:
             print('The performed action is: ' + action)
-            vote_vector.append(action)
-            print('The current vote vector looks like: ' + str(vote_vector))
+            if str(node_id) not in vote_dict:
+                if action == 'byzantine':
+                   byz_node = True
+                   return '<h1>Successfully set as Byzantine</h1>'
+                if action == 'attack':
+                    vote_dict[str(node_id)] = True
+                if action == 'retreat':
+                    vote_dict[str(node_id)] = False
 
-            # Propagate action to all other nodes example :
-            thread = Thread(target=propagate_to_vessels,
-                            args=('/propagate/VOTE/', {"action": action}, 'POST'))
-            thread.daemon = True
-            thread.start()
+                print('The current vote vector looks like: ' + str(vote_dict))
 
-            return True
+                # Propagate action to all other nodes example :
+
+                if action == 'attack':
+                    thread = Thread(target=propagate_to_vessels,
+                                    args=('/propagate/VOTE/', {"action": True, "node_id": node_id}, 'POST'))
+                if action == 'retreat':
+                    thread = Thread(target=propagate_to_vessels,
+                                    args=('/propagate/VOTE/', {"action": False, "node_id": node_id}, 'POST'))
+                thread.daemon = True
+                thread.start()
+
+                return '<h1>Successfully sent vote</h1>'
         except Exception as e:
             print e
-        return False
+        return '<h1>Failed, please retry in a few seconds</h1>'
 
          #With this function you handle requests from other nodes like add modify or delete
     @app.post('/propagate/VOTE/')
     def vote_propagation_received():
-	    #get entry from http body
-        entry = request.forms.get('action')
-        print "The received vote is: " + entry
+        global vote_dict, node_id, byz_node, no_loyal, no_total, vessel_list
+
+        try:
+            entry = request.forms.get('action')
+            rec_id = request.forms.get('node_id')
+
+            if rec_id not in vote_dict:
+                vote_dict[rec_id] = entry
+
+                print('The current vote vector looks like: ' + str(vote_dict))
+                if (len(vote_dict) == no_loyal) and (byz_node == True):
+                    byz_vect = compute_byzantine_vote_round1(no_loyal,no_total,False)
+                   
+                   # def propagate_to_vessels(path, payload = None, req = 'POST'):
+
+                    loyal_count = 0
+
+                    for vessel_id, vessel_ip in vessel_list.items():
+                        if int(vessel_id) != node_id: # don't propagate to yourself
+                            thread = Thread(target=contact_vessel, args=(vessel_ip, '/propagate/VOTE/', {"action": byz_vect[loyal_count], "node_id": node_id}, 'POST'))
+                            thread.daemon = True
+                            thread.start()
+                            loyal_count += 1
+
+                    byz_vect_to_propagate = compute_byzantine_vote_round2(no_loyal,no_total,False)
+
+                    thread = Thread(target=propagate_to_vessels,
+                                    args=('/propagate/VOTE/list', {"vector": str(byz_vect_to_propagate[0])}, 'POST'))
+                    thread.daemon = True
+                    thread.start()
+
+
+                if (len(vote_dict) == 4):
+                    thread = Thread(target=propagate_to_vessels,
+                                    args=('/propagate/VOTE/list', {"vector": str(vote_dict.values())}, 'POST'))
+                    thread.daemon = True
+                    thread.start()
+
+                return '<h1>Successfully propagated vote</h1>'
+
+        except Exception as e:
+            print e
         
-        return True
+        return '<h1>Vote propagation failed</h1>'
+
+    @app.post('/propagate/VOTE/list')
+    def list_propagation_received():
+        global vote_dict, node_id, byz_node, no_loyal, no_total, vessel_list
+
+        try:
+            entry = request.forms.get('vector')
+
+            vector_list.append(entry.split(","))
+
+            print(str(vector_list))
+
+            return '<h1>Successfully propagated vector</h1>'
+
+        except Exception as e:
+            print e
+        
+        return '<h1>Vector propagation failed</h1>'
+
+    def add_vote_received(vote, element, is_propagated_call=False):
+        global board, node_id
+        success = False
+        try:
+           if entry_sequence not in board:
+                board[entry_sequence] = element
+                success = True
+        except Exception as e:
+            print e
+        return success
+
+    #Simple methods that the byzantine node calls to decide what to vote.
+
+    #Compute byzantine votes for round 1, by trying to create
+    #a split decision.
+    #input: 
+    #   number of loyal nodes,
+    #   number of total nodes,
+    #   Decision on a tie: True or False 
+    #output:
+    #   A list with votes to send to the loyal nodes
+    #   in the form [True,False,True,.....]
+    def compute_byzantine_vote_round1(no_loyal,no_total,on_tie):
+
+        result_vote = []
+        for i in range(0,no_loyal):
+            if i%2==0:
+                result_vote.append(not on_tie)
+            else:
+                result_vote.append(on_tie)
+
+        return result_vote
+
+    #Compute byzantine votes for round 2, trying to swing the decision
+    #on different directions for different nodes.
+    #input: 
+    #   number of loyal nodes,
+    #   number of total nodes,
+    #   Decision on a tie: True or False
+    #output:
+    #   A list where every element is a the vector that the 
+    #   byzantine node will send to every one of the loyal ones
+    #   in the form [[True,...],[False,...],...]
+    def compute_byzantine_vote_round2(no_loyal,no_total,on_tie):
+      
+      result_vectors=[]
+      for i in range(0,no_loyal):
+        if i%2==0:
+          result_vectors.append([on_tie]*no_total)
+        else:
+          result_vectors.append([not on_tie]*no_total)
+      return result_vectors
     
     #------------------------------------------------------------------------------------------------------
     
