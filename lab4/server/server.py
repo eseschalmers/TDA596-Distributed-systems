@@ -23,6 +23,8 @@ try:
     byz_node = False
     no_loyal = 3
     no_total = 4
+    result_vect = []
+    result_action = ""
 
 
     # ------------------------------------------------------------------------------------------------------
@@ -42,6 +44,11 @@ try:
         global board, node_id
         print(board)
         return template('server/boardcontents_template.tpl',board_title='Vessel {}'.format(node_id), board_dict=sorted(board.iteritems()))
+
+    @app.get('/vote/result')
+    def get_board():
+        global result_vect, result_action
+        return template('server/results_template.tpl', result_vect=result_vect, result_action=result_action)
 
     # NEW BYZANTINE ALGORITHM FUNCTIONS
 
@@ -102,7 +109,7 @@ try:
 
     @app.post('/propagate/VOTE/list')
     def list_propagation_received():
-        global vote_dict, node_id, byz_node, no_total, vectors
+        global vote_dict, node_id, byz_node, no_total, no_loyal, vectors, result_vect, result_action
 
         try:
             entry = request.forms.get('vector')
@@ -112,16 +119,23 @@ try:
             vect = [str_to_bool(vote) for vote in vect]
             vectors[node] = vect
 
+            print("LOYAL received vector = {}".format(vect))
+
             if len(vectors) == no_total and not byz_node:
                 result_vect = []
-                for i in range(1, len(vectors) + 1):
+                for i in range(0, no_total):
+                    print("")
+                    print("Counts votes FOR node " + str(i))
                     attack = 0
                     retreat = 0
-                    for j in range(0, len(vectors[i])):
-                        if vectors[i][j]:
+                    for j in range(1, no_loyal+2):
+                        print("Counts votes FROM node " + str(j))
+                        if vectors[j][i]:
                             attack += 1
+                            print("True added")
                         else:
                             retreat += 1
+                            print("False added")
                     if attack > retreat:
                         result_vect.append("Attack")
                     elif retreat > attack:
@@ -129,6 +143,22 @@ try:
                     else:
                         result_vect.append("Unknown")
                 print("\n\n\n\nNode {} has result vector {}\n\n\n\n".format(node_id, result_vect))
+
+                attack = 0
+                retreat = 0
+
+                for k in range(0, len(result_vect)):
+                    if result_vect[k] == "Attack":
+                        attack += 1
+                    if result_vect[k] == "Retreat":
+                        retreat += 1
+                if attack > (no_loyal*0.5):
+                    result_action = "Attack"
+                elif retreat > (no_loyal*0.5):
+                    result_action = "Retreat"
+                else:
+                    result_action = "Unknown"
+
                 # Reset
                 vote_dict = {}
                 vectors = {}
@@ -180,9 +210,10 @@ try:
             vect = []
             for i in range(1, no_total + 1):
                 vect.append(vote_dict[i])
-            vectors[int(node_id)] = vect
             vect = [str(b) for b in vect]
             vect = ",".join(vect)
+            vectors[node_id] = vect
+            print("LOYAL propagating vector = {}".format(vect))
             thread = Thread(target=propagate_to_vessels,
                             args=('/propagate/VOTE/list', {'vector': vect, 'node_id': node_id}, 'POST'))
             thread.daemon = True
