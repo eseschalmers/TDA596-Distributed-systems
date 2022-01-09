@@ -6,9 +6,7 @@
 # Student: Léon Michalski, Max Sonnelid, Elias Estribeau
 # ------------------------------------------------------------------------------------------------------
 import traceback
-import sys
 import time
-import json
 import argparse
 from threading import Thread
 
@@ -21,48 +19,11 @@ try:
     #board stores all message on the system 
     board = {0 : "Welcome to Distributed Systems Course"} 
     vote_dict = {}
-    vector_list = []
+    vectors = {}
     byz_node = False
     no_loyal = 3
     no_total = 4
 
-    # ------------------------------------------------------------------------------------------------------
-    # BOARD FUNCTIONS
-    # You will probably need to modify them
-    # ------------------------------------------------------------------------------------------------------
-    
-    #This functions will add an new element
-    def add_new_element_to_store(entry_sequence, element, is_propagated_call=False):
-        global board, node_id
-        success = False
-        try:
-           if entry_sequence not in board:
-                board[entry_sequence] = element
-                success = True
-        except Exception as e:
-            print e
-        return success
-
-    def modify_element_in_store(entry_sequence, modified_element, is_propagated_call = False):
-        global board, node_id
-        success = False
-        try:
-            if entry_sequence in board:
-                board[entry_sequence] = modified_element
-                success = True
-        except Exception as e:
-            print e
-        return success
-
-    def delete_element_from_store(entry_sequence, is_propagated_call = False):
-        global board, node_id
-        success = False
-        try:
-            board.pop(entry_sequence)
-            success = True
-        except Exception as e:
-            print e
-        return success
 
     # ------------------------------------------------------------------------------------------------------
     # ROUTES
@@ -79,7 +40,7 @@ try:
     @app.get('/board')
     def get_board():
         global board, node_id
-        print board
+        print(board)
         return template('server/boardcontents_template.tpl',board_title='Vessel {}'.format(node_id), board_dict=sorted(board.iteritems()))
 
     # NEW BYZANTINE ALGORITHM FUNCTIONS
@@ -89,109 +50,143 @@ try:
         global vote_dict, node_id, byz_node
         try:
             print('The performed action is: ' + action)
-            if str(node_id) not in vote_dict:
+            if int(node_id) not in vote_dict:
                 if action == 'byzantine':
                    byz_node = True
+                   byzantine_behavior()
                    return '<h1>Successfully set as Byzantine</h1>'
                 if action == 'attack':
-                    vote_dict[str(node_id)] = True
+                    vote_dict[int(node_id)] = True
                 if action == 'retreat':
-                    vote_dict[str(node_id)] = False
+                    vote_dict[int(node_id)] = False
 
                 print('The current vote vector looks like: ' + str(vote_dict))
 
-                # Propagate action to all other nodes example :
-
-                if action == 'attack':
-                    thread = Thread(target=propagate_to_vessels,
-                                    args=('/propagate/VOTE/', {"action": True, "node_id": node_id}, 'POST'))
-                if action == 'retreat':
-                    thread = Thread(target=propagate_to_vessels,
-                                    args=('/propagate/VOTE/', {"action": False, "node_id": node_id}, 'POST'))
+                # Propagate action to all other nodes :
+                thread = Thread(target=propagate_to_vessels,
+                                args=('/propagate/VOTE/', {'action': str(vote_dict[int(node_id)]), 'node_id': str(node_id)}, 'POST'))
                 thread.daemon = True
                 thread.start()
 
+                loyal_behavior()
                 return '<h1>Successfully sent vote</h1>'
         except Exception as e:
-            print e
+            print(e)
         return '<h1>Failed, please retry in a few seconds</h1>'
 
          #With this function you handle requests from other nodes like add modify or delete
+
     @app.post('/propagate/VOTE/')
     def vote_propagation_received():
-        global vote_dict, node_id, byz_node, no_loyal, no_total, vessel_list
+        global vote_dict, node_id, byz_node, no_total
 
         try:
             entry = request.forms.get('action')
-            rec_id = request.forms.get('node_id')
+            entry = str_to_bool(entry)
+            rec_id = int(request.forms.get('node_id'))
 
             if rec_id not in vote_dict:
                 vote_dict[rec_id] = entry
 
-                print('The current vote vector looks like: ' + str(vote_dict))
-                if (len(vote_dict) == no_loyal) and (byz_node == True):
-                    byz_vect = compute_byzantine_vote_round1(no_loyal,no_total,False)
-                   
-                   # def propagate_to_vessels(path, payload = None, req = 'POST'):
-
-                    loyal_count = 0
-
-                    for vessel_id, vessel_ip in vessel_list.items():
-                        if int(vessel_id) != node_id: # don't propagate to yourself
-                            thread = Thread(target=contact_vessel, args=(vessel_ip, '/propagate/VOTE/', {"action": byz_vect[loyal_count], "node_id": node_id}, 'POST'))
-                            thread.daemon = True
-                            thread.start()
-                            loyal_count += 1
-
-                    byz_vect_to_propagate = compute_byzantine_vote_round2(no_loyal,no_total,False)
-
-                    thread = Thread(target=propagate_to_vessels,
-                                    args=('/propagate/VOTE/list', {"vector": str(byz_vect_to_propagate[0])}, 'POST'))
-                    thread.daemon = True
-                    thread.start()
-
-
-                if (len(vote_dict) == 4):
-                    thread = Thread(target=propagate_to_vessels,
-                                    args=('/propagate/VOTE/list', {"vector": str(vote_dict.values())}, 'POST'))
-                    thread.daemon = True
-                    thread.start()
+                print('The current vote vector of size {} is: {}'.format(len(vote_dict), vote_dict))
+                byzantine_behavior()
+                loyal_behavior()
 
                 return '<h1>Successfully propagated vote</h1>'
-
+            else:
+                return '<h1>Node {} had already voted</h1>'.format(rec_id)
         except Exception as e:
-            print e
+            print(e)
         
         return '<h1>Vote propagation failed</h1>'
 
     @app.post('/propagate/VOTE/list')
     def list_propagation_received():
-        global vote_dict, node_id, byz_node, no_loyal, no_total, vessel_list
+        global vote_dict, node_id, byz_node, no_total, vectors
 
         try:
             entry = request.forms.get('vector')
+            node = int(request.forms.get('node_id'))
 
-            vector_list.append(entry.split(","))
+            vect = entry.split(",")
+            vect = [str_to_bool(vote) for vote in vect]
+            vectors[node] = vect
 
-            print(str(vector_list))
-
-            return '<h1>Successfully propagated vector</h1>'
-
+            if len(vectors) == no_total and not byz_node:
+                result_vect = []
+                for i in range(1, len(vectors) + 1):
+                    attack = 0
+                    retreat = 0
+                    for j in range(0, len(vectors[i])):
+                        if vectors[i][j]:
+                            attack += 1
+                        else:
+                            retreat += 1
+                    if attack > retreat:
+                        result_vect.append("Attack")
+                    elif retreat > attack:
+                        result_vect.append("Retreat")
+                    else:
+                        result_vect.append("Unknown")
+                print("\n\n\n\nNode {} has result vector {}\n\n\n\n".format(node_id, result_vect))
+                # Reset
+                vote_dict = {}
+                vectors = {}
+                byz_node = False
+            elif byz_node:
+                # Reset
+                vote_dict = {}
+                vectors = {}
+                byz_node = False
+            else:
+                return '<h1>Successfully received vector</h1>'
         except Exception as e:
-            print e
-        
+            print(e)
         return '<h1>Vector propagation failed</h1>'
 
-    def add_vote_received(vote, element, is_propagated_call=False):
-        global board, node_id
-        success = False
-        try:
-           if entry_sequence not in board:
-                board[entry_sequence] = element
-                success = True
-        except Exception as e:
-            print e
-        return success
+
+    # Byzantine behavior:
+    def byzantine_behavior():
+        global vote_dict, node_id, byz_node, no_loyal, no_total, vessel_list
+        if (len(vote_dict) == no_loyal) and (byz_node == True):
+            # Send the votes from round 1 to every other loyal processes
+            byz_votes = compute_byzantine_vote_round1(no_loyal,no_total,False)
+            loyal_count = 0
+            for vessel_id, vessel_ip in vessel_list.items():
+                if int(vessel_id) != node_id: # don't propagate to yourself
+                    thread = Thread(target=contact_vessel, args=(vessel_ip, '/propagate/VOTE/', {"action": byz_votes[loyal_count], "node_id": node_id}, 'POST'))
+                    thread.daemon = True
+                    thread.start()
+                    loyal_count += 1
+
+            # Send the vector votes to every other loyal processes
+            byz_vects = compute_byzantine_vote_round2(no_loyal,no_total,False)
+            loyal_count = 0
+            for vessel_id, vessel_ip in vessel_list.items():
+                if int(vessel_id) != node_id: # don't propagate to yourself
+                    # Convert vector to string
+                    vect = [str(vote) for vote in byz_vects[loyal_count]]
+                    vect = ",".join(vect)
+                    print("BYZ propagating vector = {}".format(vect))
+                    thread = Thread(target=contact_vessel, args=(vessel_ip, '/propagate/VOTE/list', {"vector": vect, 'node_id': node_id}, 'POST'))
+                    thread.daemon = True
+                    thread.start()
+                    loyal_count += 1
+
+    def loyal_behavior():
+        global vote_dict, no_total, byz_node, vectors, node_id
+        if len(vote_dict) == no_total and not byz_node:
+            # Create our vote vector, save it and propagate it
+            vect = []
+            for i in range(1, no_total + 1):
+                vect.append(vote_dict[i])
+            vectors[int(node_id)] = vect
+            vect = [str(b) for b in vect]
+            vect = ",".join(vect)
+            thread = Thread(target=propagate_to_vessels,
+                            args=('/propagate/VOTE/list', {'vector': vect, 'node_id': node_id}, 'POST'))
+            thread.daemon = True
+            thread.start()
 
     #Simple methods that the byzantine node calls to decide what to vote.
 
@@ -236,87 +231,8 @@ try:
       return result_vectors
     
     #------------------------------------------------------------------------------------------------------
-    
-    # You NEED to change the follow functions
-    @app.post('/board')
-    def client_add_received():
-        '''Adds a new element to the board
-        Called directly when a user is doing a POST request on /board'''
-        global board, node_id
-        try:
-            new_entry = request.forms.get('entry')
-            
-            element_id = 0
-            
-            while (element_id in board):
-                element_id = element_id + 1
-
-            add_new_element_to_store(element_id, new_entry)
-
-            # Propagate action to all other nodes example :
-            thread = Thread(target=propagate_to_vessels,
-                            args=('/propagate/ADD/' + str(element_id), {'entry': new_entry}, 'POST'))
-            thread.daemon = True
-            thread.start()
-            return True
-        except Exception as e:
-            print e
-        return False
-
-    @app.post('/board/<element_id:int>/')
-    def client_action_received(element_id):
-        try:
-            global board, node_id
-            
-            print "You receive an element", element_id
-            print "id is ", node_id
-            # Get the entry from the HTTP body
-            entry = request.forms.get('entry')
-            
-            delete_option = request.forms.get('delete') 
-	        #0 = modify, 1 = delete
-	        
-            print "the delete option is ", delete_option
-            
-            #call either delete or modify
-            if (int(delete_option) == 0):
-                modify_element_in_store(element_id, entry, False)
-                action = "MODIFY"
-            
-            if (int(delete_option) == 1):
-                delete_element_from_store(element_id, False)
-                action = "DELETE"
-            
-            #propagate to other nodes
-            thread = Thread(target=propagate_to_vessels,
-                                args=('/propagate/' + action + "/" + str(element_id), {'entry': entry}, 'POST'))
-            thread.daemon = True
-            thread.start()
-        except Exception as e:
-            print e
-
-    #With this function you handle requests from other nodes like add modify or delete
-    @app.post('/propagate/<action>/<element_id:int>')
-    def propagation_received(action, element_id):
-	    #get entry from http body
-        entry = request.forms.get('entry')
-        print "the action is", action
-        
-        # Handle requests
-        if action == "ADD":
-            add_new_element_to_store(element_id, entry, True)
-        # Modify the board entry
-        elif action == "MODIFY":
-            modify_element_in_store(element_id, entry, True)
-        # Delete the entry from the board
-        elif "DELETE":
-            delete_element_from_store(element_id, True)
-        else:
-            return False
-        
-        return True
-
-
+    def str_to_bool(str):
+        return str in ["True", "true", "1"]
     # ------------------------------------------------------------------------------------------------------
     # DISTRIBUTED COMMUNICATIONS FUNCTIONS
     # ------------------------------------------------------------------------------------------------------
@@ -329,13 +245,13 @@ try:
             elif 'GET' in req:
                 res = requests.get('http://{}{}'.format(vessel_ip, path))
             else:
-                print 'Non implemented feature!'
+                print('Non implemented feature!')
             # result is in res.text or res.json()
             print(res.text)
             if res.status_code == 200:
                 success = True
         except Exception as e:
-            print e
+            print(e)
         return success
 
     def propagate_to_vessels(path, payload = None, req = 'POST'):
@@ -345,7 +261,7 @@ try:
             if int(vessel_id) != node_id: # don't propagate to yourself
                 success = contact_vessel(vessel_ip, path, payload, req)
                 if not success:
-                    print "\n\nCould not contact vessel {}\n\n".format(vessel_id)
+                    print("\n\nCould not contact vessel {}\n\n".format(vessel_id))
 
         
     # ------------------------------------------------------------------------------------------------------
@@ -368,7 +284,7 @@ try:
         try:
             run(app, host=vessel_list[str(node_id)], port=port)
         except Exception as e:
-            print e
+            print(e)
     # ------------------------------------------------------------------------------------------------------
     if __name__ == '__main__':
         main()
