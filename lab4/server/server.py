@@ -119,17 +119,17 @@ try:
             vect = [str_to_bool(vote) for vote in vect]
             vectors[node] = vect
 
-            print("LOYAL received vector = {}".format(vect))
+            print("LOYAL received vector = {} from node {}".format(vect, node))
 
             if len(vectors) == no_total and not byz_node:
                 result_vect = []
                 for i in range(0, no_total):
                     print("")
-                    print("Counts votes FOR node " + str(i))
+                    print("Counts votes FOR node " + str(i+1))
                     attack = 0
                     retreat = 0
                     for j in range(1, no_loyal+2):
-                        print("Counts votes FROM node " + str(j))
+                        print("Counts votes FROM node {} with vector {}", str(j), vectors[j])
                         if vectors[j][i]:
                             attack += 1
                             print("True added")
@@ -212,7 +212,11 @@ try:
                 vect.append(vote_dict[i])
             vect = [str(b) for b in vect]
             vect = ",".join(vect)
-            vectors[node_id] = vect
+
+            vect_to_add = vect.split(",")
+            vect_to_add = [str_to_bool(vote) for vote in vect_to_add]
+            vectors[node_id] = vect_to_add
+
             print("LOYAL propagating vector = {}".format(vect))
             thread = Thread(target=propagate_to_vessels,
                             args=('/propagate/VOTE/list', {'vector': vect, 'node_id': node_id}, 'POST'))
