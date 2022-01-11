@@ -21,8 +21,8 @@ try:
     vote_dict = {}   #Vote vector storing all incoming votes in phase 1
     vectors = {}   #Dictionary storing all incoming vote vectors in phase 2
     byz_node = False   #Boolean describing if a node is byzantine or not
-    no_loyal = 3  #Number of loyal nodes in network
-    no_total = 4  #Total number of nodes in network
+    no_loyal = 2  #Number of loyal nodes in network
+    no_total = 3  #Total number of nodes in network
     result_vect = []  #Final result vector
     result_action = ""  #Final result action
 
@@ -106,13 +106,13 @@ try:
         
         return '<h1>Vote propagation failed</h1>'
 
-    #Method for receiving a propagated vote vector (only used by loyal nodes)
-    #
+    #Method for receiving a propagated vote vector (only used by loyal nodes) and calculating the final result vector and action
     @app.post('/propagate/VOTE/list')
     def list_propagation_received():
         global vote_dict, node_id, byz_node, no_total, no_loyal, vectors, result_vect, result_action
 
         try:
+        	#If vote vector received, transform it and store it in the dictionary for vote vectors (vectors).
             entry = request.forms.get('vector')
             node = int(request.forms.get('node_id'))
 
@@ -122,43 +122,55 @@ try:
 
             print("LOYAL received vector = {} from node {}".format(vect, node))
 
+            #If vote vectors have been received from all nodes and is not byzantine node
             if len(vectors) == no_total and not byz_node:
                 result_vect = []
+                #Looping through votes for node i
                 for i in range(0, no_total):
                     print("")
                     print("Counts votes FOR node " + str(i+1))
                     attack = 0
                     retreat = 0
+                    #Looping through votes from node j
                     for j in range(1, no_loyal+2):
                         print("Counts votes FROM node {} with vector {}", str(j), vectors[j])
+                        #If vote for node i reported by node is true, add to attack count
                         if vectors[j][i]:
                             attack += 1
                             print("True added")
+                        #If vote for node i reported by node is false, add to retreat count
                         else:
                             retreat += 1
                             print("False added")
+                    #If more attacks than retreats among votes for node i, set element in result vector to attack
                     if attack > retreat:
                         result_vect.append("Attack")
+                    #If more retreats than attacks among votes for node i, set element in result vector to retreat
                     elif retreat > attack:
                         result_vect.append("Retreat")
+                    #If tie among votes for node i, set element in result vector to unknown
                     else:
                         result_vect.append("Unknown")
-                print("\n\n\n\nNode {} has result vector {}\n\n\n\n".format(node_id, result_vect))
+                print("\n\n\n\nNode {} has result vector {}".format(node_id, result_vect))
 
                 attack = 0
                 retreat = 0
 
+                #Decide on a result action from the result vector
+                #First sum the attacks resp. retreats (don't consider unknown)
+                #If on tie or attack has majority, set resulting action to attack
+                #Else, set resulting action to retreat
                 for k in range(0, len(result_vect)):
                     if result_vect[k] == "Attack":
                         attack += 1
                     if result_vect[k] == "Retreat":
                         retreat += 1
-                if attack > (no_loyal*0.5):
+                if attack >= retreat:
                     result_action = "Attack"
-                elif retreat > (no_loyal*0.5):
-                    result_action = "Retreat"
                 else:
-                    result_action = "Unknown"
+                    result_action = "Retreat"
+
+                print("Node {} has result action {}\n\n\n\n".format(node_id, result_action))
 
                 # Reset
                 vote_dict = {}
